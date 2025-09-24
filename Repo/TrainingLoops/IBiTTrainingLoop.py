@@ -1,7 +1,7 @@
 # Import neccesary libraries
 import sys
 sys.path.append('../')
-from Repo.TrainFunctions.train_IBiT import train_IBiT
+from TrainFunctions.train_IBiT import train_IBiT
 
 # Set config of model
 config = {
