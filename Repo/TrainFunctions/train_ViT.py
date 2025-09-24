@@ -22,6 +22,8 @@ from timm.scheduler import create_scheduler_v2
 def train_ViT(config, img_h, img_w, patch_size, d_model, tuning_mode = False, sim_batch_size=None):
     
     # Initialize dataset and model parameters. Use simulated batch size for equal comparisons.
+    model_loc = "/workspace/IBiT/Repo"
+    save_name = "ViT"
     batch_size = 512
     train, val, test = return_datasets_IN( batch_size=batch_size)
     size = len(train)
@@ -63,8 +65,8 @@ def train_ViT(config, img_h, img_w, patch_size, d_model, tuning_mode = False, si
     cut_mix_or_mixup = v2.RandomChoice([cut_mix, mixup])
 
     # Create model directory to store logs and models
-    if not os.path.exists("/workspace/ConvFormer/Repo/models/VisionTransformer"):
-        os.mkdir("/workspace/ConvFormer/Repo/models/VisionTransformer")
+    if not os.path.exists(f"{model_loc}/models/{save_name}"):
+        os.mkdir(f"{model_loc}/models/{save_name}")
 
     # Training Loop     
     for j in range(epochs):
@@ -153,18 +155,19 @@ def train_ViT(config, img_h, img_w, patch_size, d_model, tuning_mode = False, si
 
         # Put model back in training mode and save model 
         model.train()
-        torch.save(model.state_dict(),f"/workspace/ConvFormer/Repo/models/VisionTransformer/model{j}.pt")
+        torch.save(model.state_dict(),f"/{model_loc}/models/{save_name}/model{j}.pt")
+    
     
     # Save model and metrics of final model
-    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/grad_mags.txt", 'w+') as writer:
+    with open(f"{model_loc}/models/{save_name}/grad_mags.txt", 'w+') as writer:
         for grad_mag in grad_mags:
             writer.write(f"{grad_mag},")
-    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/val_loss.txt", 'w+') as writer:
+    with open(f"{model_loc}/models/{save_name}/val_loss.txt", 'w+') as writer:
         for loss in val_loss:
             writer.write(f"{loss},")
-    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/train_loss.txt", 'w+') as writer:
+    with open(f"{model_loc}/models/{save_name}/train_loss.txt", 'w+') as writer:
         for loss in model_loss:
             writer.write(f"{loss},")
-    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/val_accuracy.txt", 'w+') as writer:
+    with open(f"{model_loc}/models/{save_name}/val_accuracy.txt", 'w+') as writer:
         for accuracy in val_accuracy:
             writer.write(f"{accuracy},")
