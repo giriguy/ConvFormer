@@ -1,27 +1,29 @@
 import torch.nn as nn
 import torch
-from utils.layer_utils import Patchify, PositionalEncodingAppend
+from utils.layer_utils import Patchify, PositionalEncodingAdd
 from utils.device_utils import get_device
 from VisionTransformer.ViTBlock import ViTBlock
+import torchvision
+from torchvision.transforms import v2
+import random
 """Implements full Vision Transformer described in Vision Transformer paper."""
-img_h = 32
-img_w = 32
 class ViT(nn.Module):
-    def __init__(self, img_h, img_w, patch_size, d_model, dropout_p = 0.01):
+    def __init__(self, img_h, img_w, patch_size, d_model, dropout_p = 0.01, stochastic_depth_prob = 0.1, store_att=False, num_classes = 1000, channels = 3, num_heads = 3):
         super().__init__()
         self.conv_scale_up = nn.Sequential(
-            nn.Conv2d(3,25,3,padding=1),
             Patchify(patch_size = patch_size),
+            nn.Linear(channels*patch_size**2, d_model)
         )
-        self.embedding = nn.Parameter(torch.normal(0.0,0.001,(25*patch_size**2,)), requires_grad = True)
-        self.positional_encoding = PositionalEncodingAppend(total_size = d_model)
+        self.embedding = nn.Parameter(torch.normal(0.0,0.001,(d_model,)), requires_grad = True)
+        self.positional_encoding = PositionalEncodingAdd(size = d_model)
         dropout_p = dropout_p
-        block_list = [ViTBlock(num_heads = 16, d_model = d_model, dropout_p=dropout_p) for i in range(8)]
+        self.att_list = []
+        block_list = [ViTBlock(num_heads = num_heads, d_model = d_model, dropout_p=dropout_p, store_att=store_att, att_store_list=self.att_list) for i in range(12)]
         self.ViTBlocks = nn.Sequential(
             *block_list
         )
         self.fcn = nn.Sequential(
-            nn.Linear(d_model, 10),
+            nn.Linear(d_model, num_classes),
         )
     def forward(self, input):
         out0 = self.conv_scale_up(input)

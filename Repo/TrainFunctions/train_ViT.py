@@ -1,3 +1,4 @@
+# Import necessary libraries
 import os
 from torcheval.metrics import MulticlassAccuracy
 import os 
@@ -8,58 +9,121 @@ from utils.device_utils import get_device
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
-from utils.make_datasets import return_datasets
+from utils.make_datasets import return_datasets_IN
 import ray
+import random
+from torchvision.transforms import v2
+from functools import partial
+import timm
+import time
+from timm.scheduler import create_scheduler_v2
 
-def train_ViT(config, img_h, img_w, patch_size, d_model, tuning_mode = False):
-    CIFAR_Train, CIFAR_Val, CIFAR_Test = return_datasets(size=40000, batch_size=12)
+# Train function for DeiT
+def train_ViT(config, img_h, img_w, patch_size, d_model, tuning_mode = False, sim_batch_size=None):
+    
+    # Initialize dataset and model parameters. Use simulated batch size for equal comparisons.
+    batch_size = 512
+    train, val, test = return_datasets_IN( batch_size=batch_size)
+    size = len(train)
+    epochs = 300
+    if sim_batch_size == None:
+        sim_batch_size = batch_size
+    sim_batch_size = 1024
+    mult = sim_batch_size//batch_size
+
+    # Get device and initialize learning rate scheduler.
     device = get_device()
     model = ViT(img_h = img_h, img_w = img_w, d_model = d_model, patch_size=patch_size, dropout_p=config['dropout_p']).to(device)
-    optimizer = torch.optim.SGD(model.parameters(), weight_decay=config['weight_decay'], lr = config['lr'], momentum = config['momentum'])
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience = 10)
-    loss_fn = nn.CrossEntropyLoss().to(device)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total Parameters in ViT: {total_params}")
+    optimizer = torch.optim.AdamW(model.parameters(), weight_decay=config['weight_decay'], lr = config['lr'])
+    if config['lr_scheduler'] == 'Warmup-Cosine-Annealing':
+        lr_scheduler, _ = create_scheduler_v2(
+            sched = 'cosine',
+            num_epochs = epochs,
+            min_lr = 1e-5,
+            warmup_lr = 1e-6,
+            warmup_epochs = 5,
+            cooldown_epochs = 10,
+            optimizer = optimizer
+        )
+    if(config['lr_scheduler'] == 'OneCycleLR'):
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=config['lr'], epochs = epochs, steps_per_epoch = int(size/sim_batch_size), cycle_momentum=False)
+    
+     # Create loss function and arrays to log model accuracy
+    loss_fn = partial(torch.nn.functional.cross_entropy, label_smoothing=0.1)
     accuracy_fn = MulticlassAccuracy()
-    epochs = 100
-    clip_val = 3
+    # clip_val = 3
     val_accuracy = []
     model_loss = []
     val_loss = []
     grad_mags = []
-    if not os.path.exists("/Users/adithyagiri/Desktop/STS/Repo/models/VisionTransformer"):
-        os.mkdir("/Users/adithyagiri/Desktop/STS/Repo/models/VisionTransformer")
+    cut_mix = v2.CutMix(num_classes = 1000, alpha = 1.0)
+    mixup = v2.MixUp(num_classes = 1000, alpha = 0.8)
+    cut_mix_or_mixup = v2.RandomChoice([cut_mix, mixup])
+
+    # Create model directory to store logs and models
+    if not os.path.exists("/workspace/ConvFormer/Repo/models/VisionTransformer"):
+        os.mkdir("/workspace/ConvFormer/Repo/models/VisionTransformer")
+
+    # Training Loop     
     for j in range(epochs):
-        model_sub_loss = torch.zeros((len(CIFAR_Train),))
+        # Store losses for averaging later
+        model_sub_loss = torch.zeros((len(train),))
         model_sub_loss.requires_grad = False
-        for i, batch in enumerate(CIFAR_Train):
-            optimizer.zero_grad()
+        start = time.perf_counter()
+        for i, batch in enumerate(train):
+
+            # Read input data
             inputs = batch[0]
             labels = batch[1]
+
+             # Cutmix inputs and labels
+            inputs, labels = cut_mix_or_mixup(inputs, labels)
+
+            # Move model to device and compute loss and gradients 
             inputs = inputs.to(device)
             labels = labels.to(device)
-            outputs = model(inputs)
-            loss = loss_fn(outputs, labels)
-            model_sub_loss[i] = loss.cpu().detach()
-            if(i%100==0):
-                accuracy_fn.update(outputs, labels)
-                print(labels)
-                print(f"Loss: {loss}, Batch Num: {i}/{len(CIFAR_Train)}, Accuracy:{accuracy_fn.compute()}, Epoch: {j}")
+            outputs = model(inputs).contiguous()
+            loss = loss_fn(outputs, labels)/mult
+            model_sub_loss[i] = loss.cpu().detach()/mult
             loss.backward()
-            if(i%100 == 0):
+
+            if(i%(100*mult) == 0):
+                accuracy_fn.update(outputs, torch.argmax(labels, dim = -1))
+
+                # Non-Cutmix version. Included for testing purposes
+                # accuracy_fn.update(outputs, labels)
+
+                # Log model training data
                 grad_mag = torch.norm(torch.stack([torch.norm(p.grad, 2.0) for p in model.parameters() if p.grad is not None]), 2.0)
                 grad_mags.append(grad_mag)
                 print(grad_mag)
                 torch.cuda.empty_cache()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_val)
-            optimizer.step()
+                print(f"Loss: {loss}, Batch Num: {i//mult}/{len(train)//mult}, Accuracy:{accuracy_fn.compute()}, Epoch: {j}")
+            
+            if ((i+1)%mult == 0):
+                # Gradient clipping is not used in the final model. Included for testing purposes
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), clip_val)
+
+                # Update model
+                optimizer.step()
+                optimizer.zero_grad()
+
+         # Log time and other metrics and prepare model for evaluation on validation set
         model_loss.append(torch.mean(model_sub_loss,dim=-1))
+        print(f'Time for Epoch: {time.perf_counter()-start}')
+        lr_scheduler.step(j)
         print("Validation Stage:")
         dropout_modules = [module for module in model.modules() if isinstance(module,torch.nn.Dropout)]
-        [module.eval() for module in dropout_modules]
+        model.eval()
         accuracy_fn.reset()
         k = 0
-        val_sub_loss = torch.zeros((len(CIFAR_Val),))
+        val_sub_loss = torch.zeros((len(val),))
         val_sub_loss.requires_grad = False
-        for i, batch in enumerate(CIFAR_Val):
+
+        # Validation loop for model
+        for i, batch in enumerate(val):
             with torch.no_grad():
                 inputs = batch[0]
                 labels = batch[1]
@@ -71,35 +135,36 @@ def train_ViT(config, img_h, img_w, patch_size, d_model, tuning_mode = False):
                 accuracy_fn.update(outputs, labels)
                 if(k%10==0):
                     print(labels)
-                    print(f"Loss: {loss}, Batch Num: {i}/{len(CIFAR_Val)}, Accuracy:{accuracy_fn.compute()}, Epoch: {j}")
+                    print(f"Loss: {loss}, Batch Num: {i}/{len(val)}, Accuracy:{accuracy_fn.compute()}, Epoch: {j}")
                 k+=1
         print(f"Final Accuracy: {accuracy_fn.compute()}")
-        lr_scheduler.step(torch.mean(val_sub_loss))
+        
+        # Add validation scores and other metrics to recording arrays
         val_loss.append(torch.mean(val_sub_loss))
         val_accuracy.append(accuracy_fn.compute())
+
+        # Plot figures if not hyperparameter tuning model
         if tuning_mode:
             ray.train.report({"loss":torch.mean(val_sub_loss).numpy().item(), "accuracy":accuracy_fn.compute().numpy().item()})
         accuracy_fn.reset()
         if not tuning_mode:
-            plt.plot(model_loss)
-            plt.plot(val_loss)
-            plt.show()
             plt.plot(val_accuracy)
             plt.show()
-            plt.imshow(inputs[0].permute(1,2,0).cpu().detach())
-            plt.show()
-        [module.train() for module in dropout_modules]
-        torch.save(model.state_dict(),f"/Users/adithyagiri/Desktop/STS/Repo/models/VisionTransformer/model{j}.pt")
-    """Save ViT metrics"""
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/VisionTransformer/grad_mags.txt", 'w+') as writer:
+
+        # Put model back in training mode and save model 
+        model.train()
+        torch.save(model.state_dict(),f"/workspace/ConvFormer/Repo/models/VisionTransformer/model{j}.pt")
+    
+    # Save model and metrics of final model
+    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/grad_mags.txt", 'w+') as writer:
         for grad_mag in grad_mags:
             writer.write(f"{grad_mag},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/VisionTransformer/val_loss.txt", 'w+') as writer:
+    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/val_loss.txt", 'w+') as writer:
         for loss in val_loss:
             writer.write(f"{loss},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/VisionTransformer/train_loss.txt", 'w+') as writer:
+    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/train_loss.txt", 'w+') as writer:
         for loss in model_loss:
             writer.write(f"{loss},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/VisionTransformer/val_accuracy.txt", 'w+') as writer:
+    with open("/workspace/ConvFormer/Repo/models/VisionTransformer/val_accuracy.txt", 'w+') as writer:
         for accuracy in val_accuracy:
             writer.write(f"{accuracy},")

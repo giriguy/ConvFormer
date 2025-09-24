@@ -10,23 +10,29 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 from utils.make_datasets import return_datasets
 import ray
-
+"""Not used in paper. First edition of model trained on CIFAR-10"""
 def train_convformer(config, patch_size, img_h, img_w, d_model, tuning_mode = False):
+    size = 20000
+    batch_size = 10
+    epochs = 32
+    CIFAR_Train, CIFAR_Val, CIFAR_Test = return_datasets(size=size, batch_size=batch_size)
     device = get_device()
-    CIFAR_Train, CIFAR_Val, CIFAR_Test = return_datasets(size=20000, batch_size = 180)
-    model = ConvFormerResNetSmall(img_h = img_h, img_w = img_w, patch_size = patch_size, d_model = d_model, dropout_p = config['dropout_p']).to(device)
+    model = ConvFormerResNetSmall(img_h = img_h, img_w = img_w, d_model = d_model, patch_size=patch_size, mask_fidelity=config['mask_fidelity'], dropout_p=config['dropout_p']).to(device)
     optimizer = torch.optim.SGD(model.parameters(), weight_decay=config['weight_decay'], lr = config['lr'], momentum = config['momentum'])
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience = 10)
-    if not os.path.exists("/Users/adithyagiri/Desktop/STS/Repo/models/ConvFormerResNet"):
-        os.mkdir("/Users/adithyagiri/Desktop/STS/Repo/models/ConvFormerResNet")
+    if config['lr_scheduler'] == 'Plateau_W_Warmup':
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience = 10)
+    if(config['lr_scheduler'] == 'OneCycleLR'):
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=config['lr'], epochs = epochs, steps_per_epoch = int(size/batch_size), cycle_momentum=False)
+    loss_fn = nn.CrossEntropyLoss().to(device)
+    if not os.path.exists("/workspace/ConvFormer/Repo/models/ConvFormerResNet"):
+        os.mkdir("/workspace/ConvFormer/Repo/models/ConvFormerResNet")
     loss_fn = nn.NLLLoss().to(device)
     accuracy_fn = MulticlassAccuracy()
-    epochs = 100
     val_accuracy = []
     model_loss = []
     val_loss = []
     grad_mags = []
-    clip_val = 3
+    clip_val = 1
     start_batch = 0
     if not tuning_mode:
         prev_matrix = torch.gather(torch.matmul(model.res_block_11[0].mask1.transpose(-1,-2),model.res_block_11[0].mask2).cpu().detach()[0], -1, model.res_block_11[0].roll_back.cpu().detach())
@@ -99,17 +105,17 @@ def train_convformer(config, patch_size, img_h, img_w, d_model, tuning_mode = Fa
         print(f"lr: {lr_scheduler._last_lr }")
         print(f"mask_shape = {model.res_block_11[0].mask1.shape}")
         [module.train() for module in dropout_modules]
-        torch.save(model.state_dict(),f"/Users/adithyagiri/Desktop/STS/Repo/models/ConvFormerResNet/model{j}.pt")
+        torch.save(model.state_dict(),f"/workspace/ConvFormer/Repo/models/ConvFormerResNet/model{j}.pt")
     """Save ConvFormer metrics"""
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/ConvFormerResNet/grad_mags.txt", 'w+') as writer:
+    with open("/workspace/ConvFormer/Repo/models/ConvFormerResNet/grad_mags.txt", 'w+') as writer:
         for grad_mag in grad_mags:
             writer.write(f"{grad_mag},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/ConvFormerResNet/val_loss.txt", 'w+') as writer:
+    with open("/workspace/ConvFormer/Repo/models/ConvFormerResNet/val_loss.txt", 'w+') as writer:
         for loss in val_loss:
             writer.write(f"{loss},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/ConvFormerResNet/train_loss.txt", 'w+') as writer:
+    with open("/workspace/ConvFormer/Repo/models/ConvFormerResNet/train_loss.txt", 'w+') as writer:
         for loss in model_loss:
             writer.write(f"{loss},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/ConvFormerResNet/val_accuracy.txt", 'w+') as writer:
+    with open("/workspace/ConvFormer/Repo/models/ConvFormerResNet/val_accuracy.txt", 'w+') as writer:
         for accuracy in val_accuracy:
             writer.write(f"{accuracy},")

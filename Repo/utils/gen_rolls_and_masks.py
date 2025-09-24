@@ -17,28 +17,24 @@ def gen_rolls_and_masks(img_sizes, patch_size, filt_type = 'filter', should_trai
         filter = torch.normal(1, 0, size = (3,3))
         if filt_type == 'filter':
             print(f"img_h = {img_h} + img_w = {img_w}")
-            if add_cls_embeddding:
-                attention_matrix, roll_data = (data.to(device) for data in gen_filter_attention(filter=filter, img_h = img_h, img_w = img_w, stride = 1, append_cls=True))
-            else:
-                attention_matrix, roll_data = (data.to(device) for data in gen_filter_attention(filter=filter, img_h = img_h, img_w = img_w, stride = 1))
+            attention_matrix, roll_data = (data.to(device) for data in gen_filter_attention(filter=filter, img_h = img_h, img_w = img_w, stride = 1, append_cls=add_cls_embeddding))
             rolls.append(roll_data)
         elif filt_type == 'radial':
             print(f"img_h = {img_h} + img_w = {img_w}")
-            attention_matrix, roll_data = (data.to(device) for data in gen_radial(img_h = img_h, img_w = img_w, stride = 1))
+            attention_matrix, roll_data = (data.to(device) for data in gen_radial(img_h = img_h, img_w = img_w, stride = 1, append_cls=add_cls_embeddding))
             rolls.append(roll_data)
         elif filt_type == 'ones':
             print(f"img_h = {img_h} + img_w = {img_w}")
-            attention_matrix, roll_data = (data.to(device) for data in gen_ones(img_h = img_h, img_w = img_w, stride = 1))
+            attention_matrix, roll_data = (data.to(device) for data in gen_ones(img_h = img_h, img_w = img_w, stride = 1, append_cls=add_cls_embeddding))
             rolls.append(roll_data)
         else:
             print(f"img_h = {img_h} + img_w = {img_w}")
             attention_matrix, roll_data = (data.to(device) for data in gen_l1(img_h = img_h, img_w = img_w, stride = 1))
             rolls.append(roll_data)
-        plt.matshow(roll_data.cpu())
-        plt.colorbar()
-        plt.show()
-        model = MaskTrainer(seq_len = img_h*img_w+1, mask_fidelity = mask_fidelity).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr = 0.1)
+        if add_cls_embeddding:
+            model = MaskTrainer(seq_len = img_h*img_w+1, mask_fidelity = mask_fidelity).to(device)
+        else:
+            model = MaskTrainer(seq_len = img_h*img_w, mask_fidelity = mask_fidelity).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr = 0.1)
         loss_fn = nn.MSELoss()
         loop_num = 10000

@@ -2,13 +2,16 @@ from utils.layer_utils import Patchify
 import torch.nn as nn
 import math
 from ResNet.ResBlock import ResBlock
-
-"""ResNet with changeable number of layers. Allows for the training of ResNet-20, 56, and 110 by changing the number n. N corresponds with the n in the ResNet paper used to adjust the size of CIFAR-10 networks."""
+"""
+Not used in paper. ResNet with changeable number of layers. Allows for the training of ResNet-20, 56, and 110 by changing the number n. N corresponds with the n in the ResNet paper used to adjust the size of CIFAR-10 networks.
+"""
 class ResNet(nn.Module):
     def __init__(self, n = 9):
         super().__init__()
-        self.patch_size = 4
-        self.seq_len = 1024/self.patch_size
+        self.patch_size = 1
+        img_h = 16
+        img_w = 16
+        self.seq_len = (img_h*img_w)//self.patch_size
         self.inp_features = 3*self.patch_size
         self.transform_inp = nn.Sequential(
             Patchify(patch_size = int(math.sqrt(self.patch_size)))

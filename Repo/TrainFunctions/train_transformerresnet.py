@@ -11,14 +11,15 @@ import matplotlib.pyplot as plt
 from utils.make_datasets import return_datasets
 import ray
 
+""" Not used in paper. Implements training loop for TransformerResNets"""
 def train_transformerresnet(config, patch_size, img_h, img_w, d_model, tuning_mode = False):
     CIFAR_Train, CIFAR_Val, CIFAR_Test = return_datasets(size=40000, batch_size=180)
     device = get_device()
     model = TransformerResNetSmall(img_h = img_h, img_w = img_w, patch_size=patch_size, dropout_p = config['dropout_p'], d_model = d_model).to(device)
     optimizer = torch.optim.SGD(model.parameters(), weight_decay=config['weight_decay'], lr = config['lr'], momentum = config['momentum'])
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience = 10)
-    if not os.path.exists("/Users/adithyagiri/Desktop/STS/Repo/models/TransformerResNet"):
-        os.mkdir("/Users/adithyagiri/Desktop/STS/Repo/models/TransformerResNet")
+    if not os.path.exists("/workspace/STS/Repo/models/TransformerResNet"):
+        os.mkdir("/workspace/STS/Repo/models/TransformerResNet")
     loss_fn = nn.NLLLoss().to(device)
     accuracy_fn = MulticlassAccuracy()
     epochs = 100
@@ -26,7 +27,7 @@ def train_transformerresnet(config, patch_size, img_h, img_w, d_model, tuning_mo
     model_loss = []
     val_loss = []
     grad_mags = []
-    clip_val = 3
+    clip_val = 1
     start_batch = 0
     for j in range(epochs):
         model_sub_loss = torch.zeros((len(CIFAR_Train),))
@@ -91,17 +92,17 @@ def train_transformerresnet(config, patch_size, img_h, img_w, d_model, tuning_mo
             plt.show()
         print(f"lr: {lr_scheduler._last_lr }")
         [module.train() for module in dropout_modules]
-        torch.save(model.state_dict(),f"/Users/adithyagiri/Desktop/STS/Repo/models/TransformerResNet/model{j}.pt")
+        torch.save(model.state_dict(),f"/workspace/STS/Repo/models/TransformerResNet/model{j}.pt")
     """Save TransformerResNet metrics"""
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/TransformerResNet/grad_mags.txt", 'w+') as writer:
+    with open("/workspace/STS/Repo/models/TransformerResNet/grad_mags.txt", 'w+') as writer:
         for grad_mag in grad_mags:
             writer.write(f"{grad_mag},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/TransformerResNet/val_loss.txt", 'w+') as writer:
+    with open("/workspace/STS/Repo/models/TransformerResNet/val_loss.txt", 'w+') as writer:
         for loss in val_loss:
             writer.write(f"{loss},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/TransformerResNet/train_loss.txt", 'w+') as writer:
+    with open("/workspace/STS/Repo/models/TransformerResNet/train_loss.txt", 'w+') as writer:
         for loss in model_loss:
             writer.write(f"{loss},")
-    with open("/Users/adithyagiri/Desktop/STS/Repo/models/TransformerResNet/val_accuracy.txt", 'w+') as writer:
+    with open("/workspace/STS/Repo/models/TransformerResNet/val_accuracy.txt", 'w+') as writer:
         for accuracy in val_accuracy:
             writer.write(f"{accuracy},")

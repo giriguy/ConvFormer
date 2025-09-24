@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 from utils.device_utils import get_device
+import math
 """
 Conduct patching described by paper. Spreads the pixels in each non-overlapping patch along the channel dimension.
 """
@@ -24,14 +25,16 @@ class BatchNormTranspose(nn.Module):
 """
 Appends fixed sine, and cosine positional encodings to Vision Transformer and ConvFormer.
 """
-class PositionalEncodingAppend(nn.Module):
-    def __init__(self, total_size, device = get_device()):
+class PositionalEncodingAdd(nn.Module):
+    def __init__(self, size, device = get_device()):
         super().__init__()
-        self.total_size = total_size
+        self.size = size
         self.device = device
     def forward(self, input):
-        positions = torch.arange(input.shape[-2],dtype=torch.float32).view(-1, 1).to(self.device)
-        freq = 1/torch.exp(torch.linspace(0,8,int((self.total_size-input.shape[-1])/2), dtype=torch.float32)).view(1,-1).to(self.device)
+        len = input.shape[-2]
+        positions = torch.arange(len,dtype=torch.float32).view(-1, 1).to(self.device)
+        freq = 1/torch.exp(torch.linspace(0,math.ceil(math.log(len)),self.size//2, dtype=torch.float32)).view(1,-1).to(self.device)
         sin_encodings = torch.sin(torch.matmul(positions, freq)).repeat(input.shape[0],1,1)
         cos_encodings = torch.cos(torch.matmul(positions, freq)).repeat(input.shape[0],1,1)
-        return torch.cat((input, sin_encodings, cos_encodings), -1)
+        total_embedding = torch.cat((sin_encodings, cos_encodings), dim = -1)
+        return input+total_embedding
